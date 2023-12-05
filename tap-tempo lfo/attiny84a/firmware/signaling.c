@@ -24,6 +24,7 @@
 
 #include <avr/io.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "main.h"
 #include "signaling.h"
@@ -39,6 +40,7 @@ typedef enum
     WaveformRampDown,
     WaveformTriangle,
     WaveformSquare,
+	WaveformQuadPulse,
     WaveformRandom,
     WaveformCount           // Dummy entry to get the enum count.
 } Waveform;
@@ -95,6 +97,7 @@ static const uint8_t k_multiplier_alignment[MultiplierCount] =
     1   // Sixteenth note.          Matches base tempo at 1/4.
 };
 
+
 //
 // Number of base tempo counts between each time all multipliers align.
 //
@@ -118,24 +121,12 @@ static const uint8_t k_multiplier_alignment[MultiplierCount] =
 //       of the other waveforms.
 //
 
-static const uint8_t k_sine_table[WAVEFORM_RESOLUTION] =
+static const uint8_t k_sine_table[WAVEFORM_RESOLUTION/4] =
 {
       0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,
      10,  11,  12,  14,  15,  17,  18,  20,  21,  23,  25,  27,  29,  31,  33,  35,
      37,  40,  42,  44,  47,  49,  52,  54,  57,  59,  62,  65,  67,  70,  73,  76,
-     79,  82,  85,  88,  90,  93,  97, 100, 103, 106, 109, 112, 115, 118, 121, 124,
-    128, 131, 134, 137, 140, 143, 146, 149, 152, 155, 158, 162, 165, 167, 170, 173,
-    176, 179, 182, 185, 188, 190, 193, 196, 198, 201, 203, 206, 208, 211, 213, 215,
-    218, 220, 222, 224, 226, 228, 230, 232, 234, 235, 237, 238, 240, 241, 243, 244,
-    245, 246, 248, 249, 250, 250, 251, 252, 253, 253, 254, 254, 254, 255, 255, 255,
-    255, 255, 255, 255, 254, 254, 254, 253, 253, 252, 251, 250, 250, 249, 248, 246,
-    245, 244, 243, 241, 240, 238, 237, 235, 234, 232, 230, 228, 226, 224, 222, 220,
-    218, 215, 213, 211, 208, 206, 203, 201, 198, 196, 193, 190, 188, 185, 182, 179,
-    176, 173, 170, 167, 165, 162, 158, 155, 152, 149, 146, 143, 140, 137, 134, 131,
-    128, 124, 121, 118, 115, 112, 109, 106, 103, 100,  97,  93,  90,  88,  85,  82,
-     79,  76,  73,  70,  67,  65,  62,  59,  57,  54,  52,  49,  47,  44,  42,  40,
-     37,  35,  33,  31,  29,  27,  25,  23,  21,  20,  18,  17,  15,  14,  12,  11,
-     10,   9,   7,   6,   5,   5,   4,   3,   2,   2,   1,   1,   1,   0,   0,   0
+     79,  82,  85,  88,  90,  93,  97, 100, 103, 106, 109, 112, 115, 118, 121, 124 
 };
 
 //
@@ -158,6 +149,8 @@ static const uint8_t k_sine_table[WAVEFORM_RESOLUTION] =
 void ResetBaseTempo();
 void RecalculateTempo();
 void AdjustPhaseAccumulation();
+uint8_t CalcSignalDepth(uint8_t);
+
 
 //
 // Global variables.
@@ -180,11 +173,17 @@ volatile Waveform g_waveform = WaveformSine;
 volatile Multiplier g_multiplier = MultiplierQuarter;
 volatile int16_t g_tempo_adjust_offset;
 
+volatile uint8_t g_depth_ratio = 100;
+volatile uint8_t g_depth_offset = 0;
+volatile uint8_t g_depth_table[WAVEFORM_RESOLUTION];
+
 extern volatile uint8_state_flags g_state;
 extern volatile uint16_t g_tempo_ms_count;
 
 /*====== Public functions ===================================================== 
 =============================================================================*/
+
+
 
 void SetBaseTempo(uint16_t milliseconds)
 {
@@ -231,8 +230,7 @@ void StartTempoCount()
     
     ResetBaseTempo();
     AlignWaveform();
-    
-    PORTA &= ~(1 << SYNC_OUT); // Pull low.
+	
 }
 
 void StopTempoCount()
@@ -251,8 +249,7 @@ void StopTempoCount()
     
     ResetBaseTempo();
     AlignWaveform();
-    
-    PORTA |= (1 << SYNC_OUT);   // Pull high.
+
 }
 
 void TempoCountTimeout()
@@ -306,101 +303,17 @@ void PlotWaveform()
     g_table_index = (g_phase_accumulator & 0xff000000) >> 24;
     
     //
-    // Now plot a single point on the selected waveform.
+    // 20190605 - Added Depth feature, all waves are previously plotted on g_depth_table.
     //
-    
-    switch (g_waveform)
-    {
-        case WaveformSine:
-        
-            //
-            // Drawing this one from a table. The given index holds the plot
-            // value.
-            //
-        
-            OCR0A = k_sine_table[g_table_index];
-            break;
-        
-        case WaveformRampUp:
-        
-            //
-            //   /|  /|
-            //  / | / |
-            // /  |/  |
-            //
-            // Easily calculated; x = i
-            //
-        
-            OCR0A = g_table_index;
-            break;
-        
-        case WaveformRampDown:
-        
-            //
-            // \  |\  |
-            //  \ | \ |
-            //   \|  \|
-            //
-            // Easily calculated; x = max - i
-            //
-        
-            OCR0A = 0xff - g_table_index;
-            break;
-        
-        case WaveformTriangle:
-        
-            //
-            // \    /\    /
-            //  \  /  \  /
-            //   \/    \/
-            //
-            // Easily calculated; first half: x = 2i, second half: x = max - 2i
-            //
-        
-            if (g_table_index < 0x80)
-            {
-                OCR0A = g_table_index * 2;
-            }
-            else
-            {
-                OCR0A = 0xff - ((g_table_index - 0x80) * 2);
-            }
-            break;
-        
-        case WaveformSquare:
-        
-            //
-            // +-----+     |
-            // |     |     |
-            // |     +-----+
-            //
-            // Easily calculated; first half: x = min, second half: x = max
-            //
-        
-            if (g_table_index < 0x80)
-            {
-                OCR0A = 0x00;
-            }
-            else
-            {
-                OCR0A = 0xff;
-            }
-            break;
-        
-        case WaveformRandom:
-        
-            //
-            // Use whatever is the current random number. Make sure to change
-            // this number each complete waveform cycle.
-            //
-            
-            OCR0A = g_random_number;
-            break;
-        
-        default:
-            
-            break;
-    }
+    if (g_waveform == WaveformRandom){
+		//
+		// Use whatever is the current random number. Make sure to change
+		// this number each complete waveform cycle.
+		//
+		OCR0A = g_depth_table[g_random_number];
+	} else {
+		OCR0A = g_depth_table[g_table_index];
+	}
     
     //
     // If applicable, toggle the actual tempo indicator. 
@@ -476,7 +389,7 @@ void SetWaveform(int8_t change_value)
     if ((g_waveform == WaveformSine) && (change_value < 0))
     {
         g_waveform = WaveformRandom;
-    }
+	}
     else if ((g_waveform == WaveformRandom) && (change_value > 0))
     {
         g_waveform = WaveformSine;
@@ -485,6 +398,8 @@ void SetWaveform(int8_t change_value)
     {
         g_waveform = g_waveform + change_value;
     }
+	//20190605 - Since we change the WaveForm we need to update the depth table.
+	CalcDepthTable();
 }
 
 void ResetWaveformSetting()
@@ -544,6 +459,146 @@ void ResetMultiplierSetting()
     }
 }
 
+void SetDepth(int8_t change_value)
+{
+	bool updateDepthTable = false;
+	if ((g_depth_ratio >= 5) && (g_depth_ratio <= 95))
+	{
+		g_depth_ratio = g_depth_ratio + change_value * 5;
+		updateDepthTable = true;
+	}
+	else if ((change_value > 0) && (g_depth_ratio == 0)) {
+		g_depth_ratio = g_depth_ratio + change_value * 5;
+		updateDepthTable = true;
+	}
+	else if ((change_value < 0) && (g_depth_ratio == 100)) {
+		g_depth_ratio = g_depth_ratio + change_value * 5;
+		updateDepthTable = true;
+	}
+	g_depth_offset = 255.0f * (100 - g_depth_ratio) / 100.0f;
+	if (updateDepthTable){
+		CalcDepthTable();
+	}
+
+}
+
+void ResetDepthSetting()
+{
+	g_depth_ratio = 100;
+	g_depth_offset = 0;
+	CalcDepthTable();
+}
+
+void CalcDepthTable() {
+	switch (g_waveform)
+	{
+		case WaveformSine:
+
+		//
+		// Drawing this one from a table. The given index holds the plot
+		// value.
+		// 20190506 - Due memory limitations we had to reduce the sin table to 64 bytes.
+		//
+
+		for (int16_t i = 0; i < WAVEFORM_RESOLUTION / 4; i++) {
+			g_depth_table[i] = CalcSignalDepth(k_sine_table[i]);
+			g_depth_table[255 - i] = g_depth_table[i];
+			g_depth_table[127 - i] = CalcSignalDepth(255 - k_sine_table[i]);
+			g_depth_table[128 + i] = g_depth_table[127 - i];
+		}
+
+		break;
+
+		case WaveformRampUp:
+		case WaveformRandom:
+		//For random Waveform we can use the same as RampUp.
+
+		//
+		//   /|  /|
+		//  / | / |
+		// /  |/  |
+		//
+		// Easily calculated; x = i
+		//
+
+		for (int16_t i = 0; i < WAVEFORM_RESOLUTION; i++) {
+			g_depth_table[i] = CalcSignalDepth(i);
+		}
+		break;
+
+		case WaveformRampDown:
+
+		//
+		// \  |\  |
+		//  \ | \ |
+		//   \|  \|
+		//
+		// Easily calculated; x = max - i
+		//
+		for (int16_t i = 0; i < WAVEFORM_RESOLUTION; i++) {
+			g_depth_table[i] = CalcSignalDepth(0xff - i);
+		}
+		break;
+
+		case WaveformTriangle:
+
+		//
+		// \    /\    /
+		//  \  /  \  /
+		//   \/    \/
+		//
+		// Easily calculated; first half: x = 2i then mirror the second half.
+		//
+		for (int16_t i = 0; i < WAVEFORM_RESOLUTION / 2; i++) {
+			g_depth_table[i] = CalcSignalDepth(i * 2);
+			g_depth_table[255 - i] = g_depth_table[i];
+		}
+		break;
+
+		case WaveformSquare:
+
+		//
+		// +-----+     |
+		// |     |     |
+		// |     +-----+
+		//
+		// Easily calculated; first half: x = min, second half: x = max
+		//
+		g_depth_table[0] = CalcSignalDepth(0x00);
+		
+		for (int16_t i = 1; i < WAVEFORM_RESOLUTION; i++) {
+			if (i < 0x80) {
+				g_depth_table[i] = g_depth_table[0];
+			}
+			else {
+				g_depth_table[i] = 0xff;
+			}
+		}
+		break;
+		case WaveformQuadPulse:
+		//
+		// +-+ +-+ +-+ +-+			   |
+		// | | | | | | | |			   |
+		// | | | | | | | |			   |
+		// | | | | | | | |			   |
+		// | +-+ +-+ +-+ +-------------+
+		//
+		g_depth_table[0xff] = CalcSignalDepth(0x00);
+		for (int16_t i = 0; i < WAVEFORM_RESOLUTION; i++) {
+			if (((i>=0x00) && (i<0x10)) || ((i >= 0x20) && (i < 0x30)) || ((i >= 0x40) && (i < 0x50)) || ((i >= 0x60) && (i < 0x70))) {
+				g_depth_table[i] = 0xff;
+			}
+			else {
+				g_depth_table[i] = g_depth_table[0xff];
+			}
+		}
+		break;
+		default:
+		break;
+	}
+}
+
+
 /*====== Local functions ====================================================== 
 =============================================================================*/
 
@@ -599,10 +654,21 @@ void AdjustPhaseAccumulation()
     //       testing).
     //
     // Note 2: Because not all multipliers produce waveforms that align on
-    //         every base cycle, the multiplier alignemnt index also has to be
+    //         every base cycle, the multiplier alignment index also has to be
     //         taken into account when finding the correct phase accumulator.
     //         See AlignWaveform() for more details on this.
     //
     
     g_phase_accumulator = g_base_phase_accumulator * (k_multiplier_ratio[g_multiplier] * g_multiplier_alignment_index);
 }
+
+uint8_t CalcSignalDepth(uint8_t value) {
+	//Only Calc Depth if enabled.
+	if (g_depth_ratio == 100) {
+		return value;
+	}
+	else {
+		return g_depth_offset + ((value)* g_depth_ratio) / 100.0f;
+	}
+}
+

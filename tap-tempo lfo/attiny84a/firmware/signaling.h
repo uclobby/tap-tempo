@@ -55,11 +55,18 @@ void SeedRandomNumberGenerator(uint32_t seed);
 void UpdateRandomNumber();
 void PlotWaveform();
 void AlignWaveform();
+
 void AdjustSpeed(int16_t change_value);
 void ResetSpeedAdjustSetting();
+
 void SetWaveform(int8_t change_value);
 void ResetWaveformSetting();
+
 void SetMultiplier(int8_t change_value);
 void ResetMultiplierSetting();
+
+void SetDepth(int8_t change_value);
+void ResetDepthSetting();
+void CalcDepthTable();
 
 #endif // __SIGNALING_H__

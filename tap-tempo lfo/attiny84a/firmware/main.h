@@ -43,7 +43,7 @@
 #define ROTARY_A_IN             		PA4     /* Rotary interrupt input A */
 #define ROTARY_B_IN             		PA5     /* Rotary interrupt input B */
 #define TEMPO_OUT               		PA6     /* Actual multiplier tempo indicator */
-#define SYNC_OUT                		PA7     /* Base tempo indicator / sync output */
+#define LED_OUT	                		PA7     /* Base tempo indicator / sync output */
 #define SPEED_MODE_OUT          		PB0     /* Speed adjust mode indicator */
 #define SYNC_IN                 		PB1     /* External sync signal interrupt input */
 #define LFO_OUT                 		PB2     /* OC0A PWM timer output */

@@ -98,7 +98,7 @@ int main()
     // are to be input pins).
     //
     
-    DDRA = (1 << WAVE_MODE_OUT) | (1 << MULTI_MODE_OUT) | (1 << SYNC_OUT) | (1 << TEMPO_OUT);
+    DDRA = (1 << WAVE_MODE_OUT) | (1 << MULTI_MODE_OUT) | (1 << LED_OUT) | (1 << TEMPO_OUT);
     DDRB = (1 << SPEED_MODE_OUT) | (1 << LFO_OUT);
     
     //
@@ -139,7 +139,7 @@ int main()
     // This timer is used to generate the LFO PWM output signal.
     //
     
-    TCCR0A = (1 << COM0A1);                 // Clear OC0A on compare match. Set OC0A at BOTTOM.
+    TCCR0A = (1 << COM0A1) | (1<<COM0B1);                 // Clear OC0A on compare match. Set OC0A at BOTTOM.
     TCCR0A |= (1 << WGM01) | (1 << WGM00);  // Fast-PWM (TOP == 0xff).
     TCCR0B = (1 << CS00);                   // No prescaler.
     TIMSK0 = (1 << TOIE0);                  // Timer0 overflow interrupt.
@@ -297,8 +297,6 @@ int main()
 
 ISR(TIM0_OVF_vect)
 {
-    uint8_t previous_base_table_index = g_base_table_index;
-    
     //
     // Increase the phase accumulator by a given amount based on the required
     // output signal frequency. Then use the high 8 bits (0-255) of the phase
@@ -324,25 +322,6 @@ ISR(TIM0_OVF_vect)
     // Flag whenever there's an overflow in the base table index, i.e. the base
     // tempo, has just completed a full cycle.
     //
-    
-    if (previous_base_table_index > g_base_table_index)
-    {
-        //
-        // As long as we're not currently in tempo counting mode (where the LED
-        // will be explicitly set) toggle the LED state.
-        //
-        // The state of the LED output also doubles as a base frequency clock
-        // output pulse (low one complete base LFO cycle, then high one
-        // complete base LFO cycle) that can be used to synchronize a second
-        // (or several other) controller(s).
-        //
-        
-        if (g_state.is_counting_tempo == 0)
-        {
-            PORTA ^= (1 << SYNC_OUT);   // Pull high->low or low->high.
-            //AlignWaveform();
-        }
-    }
     
     //
     // Draw the next point on the waveform.
@@ -396,7 +375,7 @@ ISR(TIM1_COMPA_vect)
         g_mode_reset_ms_count++;
         
         //
-        // Reset curent mode if enough time has passed.
+        // Reset current mode if enough time has passed.
         //
         
         if (g_mode_reset_ms_count >= MODE_RESET_MIN_TIME)

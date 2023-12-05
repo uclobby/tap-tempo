@@ -42,7 +42,8 @@ typedef enum
 {
     SelectionModeSpeed = 0,
     SelectionModeWaveform,
-    SelectionModeMultiplier
+    SelectionModeMultiplier,
+	SelectionModeDepth
 } SelectionMode;
 
 //
@@ -56,7 +57,7 @@ volatile uint8_t g_open_switch_state;
 volatile uint8_t g_closed_switch_state_changed;
 volatile uint8_t g_open_switch_state_changed;
 
-volatile SelectionMode g_selection_mode = SelectionModeMultiplier;
+volatile SelectionMode g_selection_mode = SelectionModeDepth;
 
 volatile uint8_t g_speed_adjust_multiplier;
 volatile uint16_t g_continuous_speed_adjustments;
@@ -93,8 +94,9 @@ void InitializeSwitching()
     // (speed adjust), also taking care of additional initialization.
     //
     
-    g_selection_mode = SelectionModeMultiplier;
+    g_selection_mode = SelectionModeDepth;
     SetNextSelectionMode();
+	CalcDepthTable();
     
     g_continuous_speed_adjustments = 0;
     g_speed_adjust_multiplier = 1;
@@ -211,14 +213,24 @@ void SetNextSelectionMode()
         case SelectionModeMultiplier:
             
             //
-            // Switch to speed adjust mode and turn on the associated
-            // indicator.
+            // Switch to depth adjust mode, turn on 2 LEDs.
             //
             
-            g_selection_mode = SelectionModeSpeed;
-            PORTB &= ~(1 << SPEED_MODE_OUT);
+            g_selection_mode = SelectionModeDepth;
+            PORTA &= ~(1 << MULTI_MODE_OUT);
+			PORTB &= ~(1 << SPEED_MODE_OUT);
+			
             break;
+         case SelectionModeDepth:
+         
+			 //
+			 // Switch to speed adjust mode and turn on the associated
+			 // indicator.
+			 //
         
+			 g_selection_mode = SelectionModeSpeed;
+			 PORTB &= ~(1 << SPEED_MODE_OUT);
+			 break;       
         default:
             break;
     }
@@ -294,6 +306,11 @@ void ModifyCurrentSelectionMode(int8_t change_value)
             
             SetMultiplier(change_value);
             break;
+		
+		case SelectionModeDepth:
+		
+			SetDepth(change_value);
+			break;
         
         default:
             break;
@@ -318,7 +335,10 @@ void ResetCurrentSelectionMode()
             
             ResetMultiplierSetting();
             break;
-        
+        case SelectionModeDepth:
+			
+			ResetDepthSetting();
+			break;
         default:
             break;
     }
